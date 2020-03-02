@@ -24,6 +24,7 @@ More Information: [https://fkf3parking.devnetcloud.com](https://fkf3parking.devn
 ## Versioning
 
 **1.1 - 02/2020:** added dashboard functionality, fixed timezone + last update
+
 **1.0 - 12/2019:** Initial release - Webex Teams bot, website service, MQTT & DB handling
 
 ## License
