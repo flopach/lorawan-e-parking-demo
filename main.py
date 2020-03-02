@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 #
-# FKF3 E-Parking Demo 1.0
+# FKF3 E-Parking Demo 1.1
 # https://fkf3parking.devnetcloud.com
-# Flo Pachinger / flopach, Cisco Systems, Dec 2019
+# Flo Pachinger / flopach, Cisco Systems, DEC 2019
 # Apache License 2.0
 #
 import paho.mqtt.client as mqtt
@@ -13,6 +13,7 @@ from webexteamsbot import TeamsBot
 from webexteamssdk import WebexTeamsAPI
 from influxdb import InfluxDBClient
 from datetime import datetime
+from pytz import timezone
 import requests
 import logging
 from flask_cors import CORS
@@ -31,28 +32,23 @@ parkEUI4 = ""
 influx_client = InfluxDBClient(host="", port="", username='', password='', database="")
 
 # Memcache for faster status retrieval
-memcache_client = base.Client(('127.0.0.1', 11211))
+memcache_client = base.Client(('', ))
 
 # MQTT broker credentials
 client = mqtt.Client("")
 client.tls_set("", tls_version=2)
 client.username_pw_set("", "")
-client.connect("", 8883, 60)
+client.connect("", , )
 
 # Cisco Webex Teams Infos
-bot_email = ""
+bot_email = "fkf3parkingbot@webex.bot"
 bot_token = ""
 bot_url = ""
 bot_app_name = ""
 webexAPI = WebexTeamsAPI(access_token=bot_token)
 
 # Create the Bot Object
-bot = TeamsBot(
-    bot_app_name,
-    teams_bot_token=bot_token,
-    teams_bot_url=bot_url,
-    teams_bot_email=bot_email,
-)
+bot = TeamsBot(bot_app_name,teams_bot_token=bot_token,teams_bot_url=bot_url,teams_bot_email=bot_email)
 
 #allow CORS for the website
 CORS(bot)
@@ -70,6 +66,7 @@ def on_message(client, userdata, message):
     # Get JSON data into a dict
     rawjson = message.payload.decode('utf-8')
     data = json.loads(rawjson)
+    print(data)
 
     """
     check which lora devices is sending the data
@@ -109,6 +106,7 @@ def on_message(client, userdata, message):
 
         # Insert data into memcache
         memcache_client.set("park{}".format(parkingspace), parkingstatus)
+        memcache_client.set("lastupdate", datetime.now(timezone("Europe/Berlin")).strftime('%A, %d.%m.%Y %H:%M'))
 
         """
         Check if ALL parking spaces are occupied.
@@ -159,7 +157,7 @@ def insert_json_influx(parkingspace, parkingstatus, port):
             "fields": {
                 "value": parkingstatus,
             },
-            "time": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
+            "time": datetime.now(timezone("Europe/Berlin")).strftime('%Y-%m-%dT%H:%M:%S')
         }
     ]
     # write data into the influxdb
@@ -167,15 +165,16 @@ def insert_json_influx(parkingspace, parkingstatus, port):
 
 #Initaliaze Memcache ang get latest data from influx
 def init_memcache_parkingstatus():
-    parkingstatus_1 = influx_client.query("SELECT LAST(value) FROM parkingstatus WHERE parkingspace = '1'")
-    parkingstatus_2 = influx_client.query("SELECT LAST(value) FROM parkingstatus WHERE parkingspace = '2'")
-    parkingstatus_3 = influx_client.query("SELECT LAST(value) FROM parkingstatus WHERE parkingspace = '3'")
-    parkingstatus_4 = influx_client.query("SELECT LAST(value) FROM parkingstatus WHERE parkingspace = '4'")
+    parkingstatus_1 = influx_client.query("SELECT LAST(value) FROM parkingstatus WHERE parkingspace = '1' AND port = '1'")
+    parkingstatus_2 = influx_client.query("SELECT LAST(value) FROM parkingstatus WHERE parkingspace = '2' AND port = '1'")
+    parkingstatus_3 = influx_client.query("SELECT LAST(value) FROM parkingstatus WHERE parkingspace = '3' AND port = '1'")
+    parkingstatus_4 = influx_client.query("SELECT LAST(value) FROM parkingstatus WHERE parkingspace = '4' AND port = '1'")
 
     memcache_client.set('park1', list(parkingstatus_1.get_points())[0]["last"])
     memcache_client.set('park2', list(parkingstatus_2.get_points())[0]["last"])
     memcache_client.set('park3', list(parkingstatus_3.get_points())[0]["last"])
     memcache_client.set('park4', list(parkingstatus_4.get_points())[0]["last"])
+    memcache_client.set("lastupdate", datetime.now(timezone("Europe/Berlin")).strftime('%A, %d.%m.%Y %H:%M'))
     print("Memcache setted up!")
 
 # Define event callbacks
@@ -284,8 +283,10 @@ def wc():
     status = { "park1": int(memcache_client.get('park1')),
                "park2": int(memcache_client.get('park2')),
                "park3": int(memcache_client.get('park3')),
-               "park4": int(memcache_client.get('park4'))
+               "park4": int(memcache_client.get('park4')),
+               "lastupdate": memcache_client.get('lastupdate').decode("utf-8", "ignore")
                }
+    print(type(memcache_client.get('lastupdate')))
     return json.dumps(status)
 
 """
@@ -297,7 +298,7 @@ if __name__ == "__main__":
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
     client.on_message = on_message
-    #client.on_log = on_log
+    client.on_log = on_log
     client.on_publish = on_publish
 
     # Topics to subscribe
@@ -313,8 +314,9 @@ if __name__ == "__main__":
     bot.set_help_message("Hi! I will automatically notify you if one parking space is still available or all are occupied. You can also ask me, see commands below. More information: https://fkf3parking.devnetcloud.com:\n")
     bot.remove_command("/echo")
     bot.add_command("/c", "Get the current parking status", getc)
+    #bot.add_command("/r", "Remove the bot from the current room", removebot)
     bot.add_new_url("/wc", "website-current", wc)
 
     # Start MQTT client and run bot
     client.loop_start()
-    bot.run(host="0.0.0.0", port=5000)
+    bot.run(host="0.0.0.0", port=999)
